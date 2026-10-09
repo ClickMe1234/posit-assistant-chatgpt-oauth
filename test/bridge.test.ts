@@ -100,6 +100,13 @@ test('OAuth standard error strings and direct-admission detail bodies have safe 
   assert.equal(admission.bodyShape, 'detail-string');
 });
 
+test('404 recovery is actionable and diagnostic parameter fields cannot echo arbitrary content', async () => {
+  const response = await upstreamError(Response.json({ error: { message: 'untrusted server text', param: 'input[4].content' } }, { status: 404 }));
+  assert.equal(response.param, 'input[4].content'); assert.match(response.message, /new Assistant chat/); assert.match(response.message, /Output/);
+  const reflected = await upstreamError(Response.json({ error: { param: 'Bearer mock-token / private input' } }, { status: 400 }));
+  assert.equal(reflected.param, undefined); assert.ok(!reflected.message.includes('mock-token'));
+});
+
 test('request activity follows admitted streams and clears on completion, failure and cancellation', async () => {
   for (const outcome of ['complete', 'failure', 'cancel'] as const) {
     const activity: boolean[] = []; const controller = new AbortController();
@@ -117,4 +124,53 @@ test('request activity follows admitted streams and clears on completion, failur
     assert.deepEqual(activity, outcome === 'failure' ? [false] : [true, false]);
     assert.equal(bridge.receipts[0].source, 'assistant');
   }
+});
+
+test('mocked plot cycle streams tool arguments, replays SDK references and forwards the image on follow-up turns', async () => {
+  const requests: any[] = [];
+  const reasoning = { type: 'reasoning', id: 'rs-plot', summary: [], encrypted_content: 'synthetic-reasoning' };
+  const call = { type: 'function_call', id: 'fc-plot', namespace: 'positron', call_id: 'call-plot', name: 'getPlot', arguments: '{"id":"plot-1"}' };
+  const answer = { type: 'message', id: 'msg-plot', role: 'assistant', content: [{ type: 'output_text', text: 'The plot contains a red line.' }] };
+  const image = { type: 'input_image', image_url: 'data:image/png;base64,c3ludGhldGlj', detail: 'auto' };
+  const upstream = (async (url: string, init: RequestInit) => {
+    if (url.endsWith('/models')) return Response.json({ models: [{ slug: 'gpt-6.1-sol', display_name: 'Sol', visibility: 'list' }] });
+    const request = JSON.parse(init.body as string); requests.push(request);
+    // Reproduce the storage mismatch: OpenAI cannot look up unstored item IDs.
+    if (request.input.some((item: any) => item.type === 'item_reference')) return Response.json({ error: { code: 'not_found' } }, { status: 404 });
+    assert.equal(request.store, false); assert.equal(request.stream, true);
+    if (requests.length === 1) return sse([
+      { type: 'response.output_item.done', output_index: 0, item: reasoning },
+      { type: 'response.output_item.added', output_index: 1, item: { ...call, arguments: '' } },
+      { type: 'response.function_call_arguments.delta', output_index: 1, item_id: call.id, delta: '{"id":' },
+      { type: 'response.function_call_arguments.delta', output_index: 1, item_id: call.id, delta: '"plot-1"}' },
+      { type: 'response.output_item.done', output_index: 1, item: call }, completed([reasoning, call])
+    ]);
+    return sse([{ type: 'response.output_text.delta', output_index: 0, delta: answer.content[0].text }, { type: 'response.output_item.done', output_index: 0, item: answer }, completed([answer])]);
+  }) as typeof fetch;
+  const bridge = new OAuthBridge(fakeAuth(), 'local', await freePort(), upstream); await bridge.start();
+  try {
+    const input: any[] = [{ role: 'user', content: 'View my current plot.' }];
+    const tools = [{ type: 'function', name: 'getPlot', parameters: { type: 'object' } }];
+    const send = async () => {
+      const response = await fetch(`${bridge.baseUrl}/responses`, { method: 'POST', headers: { Authorization: 'Bearer local', 'Content-Type': 'application/json' }, body: JSON.stringify({ model: 'gpt-6.1-sol', store: true, input, tools }) });
+      assert.equal(response.status, 200); const received: any[] = []; for await (const event of events(response.body!)) received.push(event); return received;
+    };
+    const first = await send();
+    assert.equal(first.filter(event => event.type.endsWith('arguments.delta')).map(event => event.delta).join(''), call.arguments);
+    const localCall = first.find(event => event.item?.type === 'function_call' && event.type.endsWith('.done')).item;
+    assert.equal(localCall.namespace, undefined);
+    input.push({ type: 'item_reference', id: reasoning.id }, localCall, { type: 'function_call_output', call_id: call.call_id, output: [{ type: 'input_text', text: 'Current plot' }, image] });
+    const second = await send(); assert.ok(second.some(event => event.type === 'response.output_text.delta'));
+    assert.deepEqual(requests[1].input[1], reasoning); assert.equal(requests[1].input[2].namespace, 'positron');
+    assert.deepEqual(requests[1].input[3].output[1], image);
+    input.push({ type: 'item_reference', id: answer.id }, { role: 'user', content: 'What colour was the line?' });
+    await send(); assert.deepEqual(requests[2].input[4], answer);
+    assert.equal(bridge.receipts[1].inputImages, 1); assert.equal(bridge.receipts[1].resolvedReferences, 1);
+    assert.equal(bridge.receipts[2].resolvedReferences, 2); assert.equal(bridge.receipts[2].completed, true);
+    const diagnostics = JSON.stringify(bridge.receipts); assert.ok(!diagnostics.includes(image.image_url)); assert.ok(!diagnostics.includes(reasoning.encrypted_content));
+    bridge.cancelAll();
+    const missing = await fetch(`${bridge.baseUrl}/responses`, { method: 'POST', headers: { Authorization: 'Bearer local', 'Content-Type': 'application/json' }, body: JSON.stringify({ model: 'gpt-6.1-sol', input }) });
+    assert.equal(missing.status, 409); assert.equal((await missing.json() as any).error.code, 'history_item_unavailable');
+    assert.equal(requests.length, 3);
+  } finally { await bridge.stop(); }
 });

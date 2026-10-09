@@ -4,7 +4,7 @@ export const TOOL_NAMESPACE = 'positron';
 const allowed = new Set(['model', 'input', 'instructions', 'reasoning', 'text', 'include', 'tools', 'tool_choice', 'parallel_tool_calls', 'service_tier', 'prompt_cache_key']);
 const unsupportedTools = new Set(['image_generation', 'file_search', 'code_interpreter', 'computer_use_preview', 'computer', 'mcp', 'tool_search', 'programmatic_tool_calling']);
 
-export function adaptRequest(request: any): any {
+export function adaptRequest(request: any, resolveItem?: (id: string) => any): any {
   if (!request || typeof request.model !== 'string' || !Array.isArray(request.input))
     throw new BridgeError(400, 'invalid_request', 'A Responses request must include a model and explicit input history array.');
   if (request.previous_response_id || request.conversation)
@@ -14,6 +14,10 @@ export function adaptRequest(request: any): any {
   output.store = false;
   output.stream = true;
   output.input = output.input.map((item: any) => {
+    if (item?.type === 'item_reference') {
+      if (typeof item.id !== 'string' || !resolveItem) throw new BridgeError(409, 'history_item_unavailable', 'Assistant sent a stored-item reference. Start a new Assistant chat so full local history can be replayed.');
+      item = resolveItem(item.id);
+    }
     if (item.role === 'system') item.role = 'developer';
     if (item.type === 'function_call' || item.type === 'custom_tool_call') item.namespace ??= TOOL_NAMESPACE;
     if (item.type === 'tool_search_call' || item.type === 'tool_search_output')

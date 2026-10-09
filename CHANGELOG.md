@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.1
+
+- Enable image attachments and plot/tool-result images for discovered GPT-6 and GPT-5.6 model families. Preserve inline image content in Responses requests.
+- Expand Assistant SDK stored-item references from bounded, account-scoped in-memory output history. This fixes a reproduced storage mismatch that can cause upstream 404 errors with `store: false`; the precise cause of the reported laptop 404 remains unverified.
+- Automatically back up and migrate the owned 0.2.0 provider's image flags on activation; preserve unrelated providers and disabled state. Saved sign-in is reused.
+- Report image/reference counts without logging contents. Provide recovery instructions when history has expired or was lost on reload.
+- Add mocked plot-tool streaming/multi-turn replay, cache isolation/expiry/bounds, image adaptation and provider migration regression tests. Start a new Assistant chat after upgrading. No fresh live image inference is claimed.
+
 ## 0.2.0
 
 - First public release as **Posit Assistant ChatGPT OAuth**, publisher `clickme1234`.

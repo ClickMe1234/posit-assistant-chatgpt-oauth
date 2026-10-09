@@ -10,6 +10,7 @@ import { UsageIndicator, showWelcomeOnce } from './usage';
 
 const USAGE = 'https://chatgpt.com/#settings/Usage';
 const BRIDGE_SECRET = 'bridge.credential.v1';
+const PROVIDER_METADATA_VERSION = 1;
 let shutdown: (() => Promise<void>) | undefined;
 
 export async function activate(context: vscode.ExtensionContext) {
@@ -104,6 +105,7 @@ export async function activate(context: vscode.ExtensionContext) {
     await vscode.commands.executeCommand('authentication.addCustomProvider', { name: PROVIDER_NAME, kind: 'openai', baseUrl: activeBridge.baseUrl, apiKey: await context.secrets.get(BRIDGE_SECRET), modelIds: models.map(model => model.slug) });
     await context.globalState.update('ownsProvider', true);
     await updateOwnedProvider(configPath, activeBridge.baseUrl, models);
+    await context.globalState.update('providerMetadataVersion', PROVIDER_METADATA_VERSION);
     output.appendLine(`Assistant provider connected. Configuration backup: ${backup}`);
     void vscode.window.showInformationMessage(`Select ${PROVIDER_NAME} in Posit Assistant’s model picker to use your ChatGPT plan.`, 'Open Assistant').then(action => { if (action) void vscode.commands.executeCommand('posit-assistant.open'); });
     return { provider: PROVIDER_NAME, baseUrl: activeBridge.baseUrl, backup, models: models.map(model => model.slug) };
@@ -161,7 +163,25 @@ export async function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(vscode.window.registerUriHandler({ handleUri: async uri => { const action = ({ '/sign-in': 'chatgptOAuth.signIn', '/status': 'chatgptOAuth.status', '/connect': 'chatgptOAuth.connectAssistant' } as Record<string, string>)[uri.path]; if (action && !uri.query) await vscode.commands.executeCommand(action); } }));
   shutdown = async () => { disposed = true; auth.dispose(); await bridge?.stop(); };
   await updateBar();
-  if (await auth.active()) { try { await ensureBridge(); } catch (error) { await handleError(error); } }
+  if (await auth.active()) {
+    try {
+      const activeBridge = await ensureBridge();
+      if (context.globalState.get('ownsProvider', false) && context.globalState.get('providerMetadataVersion', 0) < PROVIDER_METADATA_VERSION) {
+        const { value } = await readConfig(configPath);
+        const entry = value.providers?.custom?.[PROVIDER_NAME];
+        if (entry) {
+          if (entry.type !== 'openai' || entry.baseUrl !== activeBridge.baseUrl) throw new BridgeError(409, 'provider_changed', 'The provider endpoint changed. Reconnect ChatGPT OAuth to update image support.');
+          const models = await activeBridge.models();
+          const backup = await backupConfig(configPath, context.globalStorageUri.fsPath);
+          await context.globalState.update('lastProviderBackup', backup);
+          await updateOwnedProvider(configPath, activeBridge.baseUrl, models, false);
+          await context.globalState.update('providerMetadataVersion', PROVIDER_METADATA_VERSION);
+          output.appendLine('Updated the owned Assistant provider with image and plot capabilities; previous configuration was backed up.');
+          void vscode.window.showInformationMessage('ChatGPT OAuth image support is enabled. Start a new Assistant chat to use the updated model capabilities.');
+        }
+      }
+    } catch (error) { await handleError(error); }
+  }
   // A small testable control API; it never exports tokens or local credentials.
   return { status, signIn, discoverModels: discover, verifyStream, connectAssistant, disconnectAssistant, signOut,
     renewSession: async () => { await auth.accessToken(true); return { renewed: true, expiresAt: new Date((await auth.active())!.expiresAt).toISOString() }; } };

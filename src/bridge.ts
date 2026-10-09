@@ -4,9 +4,15 @@ import { OAuthManager, RESOURCE } from './oauth';
 import { adaptEvent, adaptRequest } from './adapter';
 import { BridgeError, safeError, upstreamError } from './errors';
 import { encodeEvent, events } from './sse';
+import { ResponseHistory } from './history';
 
 export interface AccountModel { slug: string; display_name: string; visibility: string; context_window?: number; [key: string]: any; }
-export interface RequestReceipt { sequence: number; source: 'assistant' | 'verification'; model: string; inputItems: number; userMessages: number; functionOutputs: number; tools: number; toolCalls: number; textDeltas: number; completed: boolean; cancelled: boolean; errorCode?: string; upstreamStatus?: number; upstreamContentType?: string; requestId?: string; }
+export interface RequestReceipt { sequence: number; source: 'assistant' | 'verification'; model: string; inputItems: number; userMessages: number; functionOutputs: number; inputImages: number; resolvedReferences: number; tools: number; toolCalls: number; textDeltas: number; completed: boolean; cancelled: boolean; errorCode?: string; errorParam?: string; upstreamStatus?: number; upstreamContentType?: string; requestId?: string; }
+
+function imageCount(input: any[]): number {
+  return input.reduce((count, item) => count + [item.content, item.output].reduce((sum, parts) =>
+    sum + (Array.isArray(parts) ? parts.filter(part => part?.type === 'input_image').length : 0), 0), 0);
+}
 
 export class OAuthBridge {
   private server?: Server;
@@ -15,6 +21,7 @@ export class OAuthBridge {
   private catalogPending?: Promise<AccountModel[]>;
   readonly receipts: RequestReceipt[] = [];
   private sequence = 0;
+  private history = new ResponseHistory();
   constructor(private auth: OAuthManager, private credential: string, readonly port: number, private fetcher: typeof fetch = fetch, private report: (receipt: RequestReceipt) => void = () => {}, private activity: (receipt: RequestReceipt, active: boolean) => void = () => {}) {}
   get baseUrl() { return `http://127.0.0.1:${this.port}/v1`; }
   async models(signal?: AbortSignal, force = false): Promise<AccountModel[]> {
@@ -50,17 +57,21 @@ export class OAuthBridge {
     return response;
   }
   async *stream(request: any, signal: AbortSignal, source: RequestReceipt['source'] = 'verification'): AsyncGenerator<any> {
-    const adapted = adaptRequest(request);
+    const session = await this.auth.active();
+    if (!session) throw new BridgeError(401, 'sign_in_required', 'Continue with ChatGPT first.');
+    this.history.selectAccount(session.clientId);
+    const adapted = adaptRequest(request, this.history.resolve);
     const controller = new AbortController();
     const abort = () => controller.abort();
     signal.addEventListener('abort', abort, { once: true }); if (signal.aborted) abort();
     this.requests.add(controller);
-    const receipt: RequestReceipt = { sequence: ++this.sequence, source, model: adapted.model, inputItems: adapted.input.length, userMessages: adapted.input.filter((item: any) => item.role === 'user').length, functionOutputs: adapted.input.filter((item: any) => item.type === 'function_call_output').length, tools: adapted.tools?.flatMap((tool: any) => tool.tools ?? [tool]).length ?? 0, toolCalls: 0, textDeltas: 0, completed: false, cancelled: false };
+    const receipt: RequestReceipt = { sequence: ++this.sequence, source, model: adapted.model, inputItems: adapted.input.length, userMessages: adapted.input.filter((item: any) => item.role === 'user').length, functionOutputs: adapted.input.filter((item: any) => item.type === 'function_call_output').length, inputImages: imageCount(adapted.input), resolvedReferences: request.input.filter((item: any) => item?.type === 'item_reference').length, tools: adapted.tools?.flatMap((tool: any) => tool.tools ?? [tool]).length ?? 0, toolCalls: 0, textDeltas: 0, completed: false, cancelled: false };
     this.receipts.push(receipt);
     if (this.receipts.length > 1000) this.receipts.shift();
     try {
       controller.signal.throwIfAborted();
       const catalog = await this.models(controller.signal);
+      if ((await this.auth.active())?.clientId !== session.clientId) throw new BridgeError(409, 'account_changed', 'The active account changed during request preparation. Retry in a new Assistant chat.');
       if (!catalog.some(model => model.slug === adapted.model)) throw new BridgeError(400, 'model_unavailable', 'Select a model discovered for the current ChatGPT account.');
       const response = await this.authorizedFetch(`${RESOURCE}/responses`, { method: 'POST', body: JSON.stringify(adapted), signal: controller.signal });
       receipt.upstreamStatus = response.status;
@@ -73,6 +84,8 @@ export class OAuthBridge {
       // Some gateways omit or mislabel Content-Type; never infer success from it.
       let terminal = false;
       for await (const raw of events(response.body, controller.signal)) {
+        controller.signal.throwIfAborted();
+        this.history.remember(raw, session.clientId);
         const event = adaptEvent(raw);
         if (event.type === 'response.output_text.delta') receipt.textDeltas++;
         if (event.type === 'response.output_item.done' && ['function_call', 'custom_tool_call'].includes(event.item?.type)) receipt.toolCalls++;
@@ -89,7 +102,7 @@ export class OAuthBridge {
         if (terminal) break;
       }
       if (!terminal) throw new BridgeError(502, 'truncated_stream', 'The stream closed without response.completed.');
-    } catch (error) { receipt.cancelled = controller.signal.aborted; receipt.errorCode = safeError(error).code; throw error; }
+    } catch (error) { receipt.cancelled = controller.signal.aborted; receipt.errorCode = safeError(error).code; receipt.errorParam = safeError(error).param; throw error; }
     finally { this.requests.delete(controller); signal.removeEventListener('abort', abort); this.activity(receipt, false); this.report({ ...receipt }); }
   }
   async start(): Promise<void> {
@@ -146,6 +159,6 @@ export class OAuthBridge {
     res.writeHead(error.status < 400 || error.status > 599 ? 500 : error.status, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ error: { type: 'bridge_error', code: error.code, message: error.message, param: error.param ?? null }, ...(error.bodyShape ? { upstream: { bodyShape: error.bodyShape } } : {}) }));
   }
-  cancelAll() { for (const controller of this.requests) controller.abort(); this.catalog = undefined; this.catalogPending = undefined; }
+  cancelAll() { for (const controller of this.requests) controller.abort(); this.catalog = undefined; this.catalogPending = undefined; this.history.clear(); }
   async stop() { this.cancelAll(); const server = this.server; this.server = undefined; if (server) { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); } }
 }

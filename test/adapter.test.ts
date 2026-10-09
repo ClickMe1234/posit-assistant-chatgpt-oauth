@@ -50,3 +50,14 @@ test('malformed SSE is an error rather than silent success', async () => {
   const body = new ReadableStream<Uint8Array>({ start(controller) { controller.enqueue(Buffer.from('data: {invalid}\n\n')); controller.close(); } });
   await assert.rejects(async () => { for await (const _ of events(body)) { /* consume */ } }, /malformed/);
 });
+
+test('preserves attached images and multimodal plot-tool output in Responses format', () => {
+  const image = { type: 'input_image', image_url: 'data:image/png;base64,c3ludGhldGlj', detail: 'auto' };
+  const input = [{ role: 'user', content: [{ type: 'input_text', text: 'Inspect this image' }, image] },
+    { type: 'function_call', call_id: 'plot-1', name: 'getPlot', arguments: '{}' },
+    { type: 'function_call_output', call_id: 'plot-1', output: [{ type: 'input_text', text: 'Current plot' }, image] }];
+  const adapted = adaptRequest({ model: 'gpt-6.1-sol', input });
+  assert.deepEqual(adapted.input[0].content, input[0].content);
+  assert.deepEqual(adapted.input[2], input[2]); assert.equal(adapted.input[1].namespace, 'positron');
+  assert.equal(adapted.store, false); assert.equal(adapted.stream, true);
+});

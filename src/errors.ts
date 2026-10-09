@@ -19,11 +19,12 @@ export async function upstreamError(response: Response): Promise<BridgeError> {
   const fallback = response.status === 401 ? 'OpenAI rejected the selected account credentials or direct-plan permission.'
     : response.status === 403 ? 'OpenAI denied this request due to account, workspace, region or policy restrictions.'
     : response.status === 429 ? 'OpenAI usage limit reached. Manage usage at https://chatgpt.com/#settings/Usage.'
+    : response.status === 404 ? 'OpenAI returned HTTP 404 for the subscription request. Start a new Assistant chat. If it repeats, discover account models again and share only the failed request receipt from View > Output > ChatGPT OAuth.'
     : response.status === 503 ? 'The public subscription route is unavailable or not enabled. Try again later.'
     : `OpenAI request failed (HTTP ${response.status}).`;
   return new BridgeError(response.status, code, messages[code] ?? fallback,
     response.headers.get('x-request-id') ?? response.headers.get('openai-request-id') ?? undefined,
-    typeof body?.error?.param === 'string' ? body.error.param : undefined,
+    typeof body?.error?.param === 'string' && body.error.param.length <= 128 && /^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*|\[\d+\])*$/.test(body.error.param) ? body.error.param : undefined,
     response.headers.get('retry-after') ?? undefined,
     typeof body?.error === 'string' ? 'oauth-error-string' : body?.error && typeof body.error === 'object' ? 'error-object' : typeof body?.detail === 'string' ? 'detail-string' : 'other');
 }
