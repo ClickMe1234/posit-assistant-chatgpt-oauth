@@ -1,0 +1,15 @@
+node_modules/**
+.research/**
+.live/**
+.posit/**
+src/**
+test/**
+scripts/**
+artifacts/**
+package-lock.json
+tsconfig.json
+.gitignore
+.vscode/**
+.github/**
+.env
+.env.*

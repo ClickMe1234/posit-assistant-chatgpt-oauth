@@ -1,0 +1,4 @@
+This file is dedicated to live Posit Assistant tool verification.
+marker=POSITRON-LOCAL-TOOLS-9142
+state=pending
+

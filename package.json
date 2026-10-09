@@ -1,0 +1,104 @@
+{
+  "name": "posit-assistant-chatgpt-oauth",
+  "displayName": "Posit Assistant ChatGPT OAuth",
+  "description": "Use your ChatGPT plan in Posit Assistant through documented browser sign-in and a loopback Responses bridge.",
+  "version": "0.2.0",
+  "publisher": "clickme1234",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.100.0",
+    "positron": "^2026.9.0"
+  },
+  "categories": [
+    "AI"
+  ],
+  "extensionKind": [
+    "ui"
+  ],
+  "main": "./dist/extension.cjs",
+  "activationEvents": [
+    "onStartupFinished",
+    "onUri"
+  ],
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "check": "tsc --noEmit",
+    "test": "tsx --test test/*.test.ts",
+    "package": "npm run build && vsce package --no-dependencies --allow-missing-repository -o artifacts/posit-assistant-chatgpt-oauth-0.2.0.vsix"
+  },
+  "contributes": {
+    "commands": [
+      {
+        "command": "chatgptOAuth.signIn",
+        "title": "Continue with ChatGPT",
+        "category": "ChatGPT OAuth"
+      },
+      {
+        "command": "chatgptOAuth.signOut",
+        "title": "Sign Out",
+        "category": "ChatGPT OAuth"
+      },
+      {
+        "command": "chatgptOAuth.status",
+        "title": "Show Connection Status",
+        "category": "ChatGPT OAuth"
+      },
+      {
+        "command": "chatgptOAuth.models",
+        "title": "Discover Account Models",
+        "category": "ChatGPT OAuth"
+      },
+      {
+        "command": "chatgptOAuth.verifyStream",
+        "title": "Verify Subscription Stream",
+        "category": "ChatGPT OAuth"
+      },
+      {
+        "command": "chatgptOAuth.connectAssistant",
+        "title": "Connect Posit Assistant",
+        "category": "ChatGPT OAuth"
+      },
+      {
+        "command": "chatgptOAuth.disconnectAssistant",
+        "title": "Remove Assistant Provider",
+        "category": "ChatGPT OAuth"
+      },
+      {
+        "command": "chatgptOAuth.manageUsage",
+        "title": "Manage Usage",
+        "category": "ChatGPT OAuth"
+      }
+    ],
+    "configuration": {
+      "title": "ChatGPT OAuth",
+      "properties": {
+        "chatgptOAuth.port": {
+          "type": "number",
+          "default": 17864,
+          "minimum": 1024,
+          "maximum": 65535,
+          "description": "Loopback bridge port. Reload Positron after changing."
+        }
+      }
+    }
+  },
+  "dependencies": {
+    "jose": "^6.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/vscode": "^1.100.0",
+    "@vscode/vsce": "^4.0.0",
+    "esbuild": "^0.25.0",
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ClickMe1234/posit-assistant-chatgpt-oauth.git"
+  },
+  "homepage": "https://github.com/ClickMe1234/posit-assistant-chatgpt-oauth#readme",
+  "bugs": {
+    "url": "https://github.com/ClickMe1234/posit-assistant-chatgpt-oauth/issues"
+  }
+}

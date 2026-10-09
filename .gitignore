@@ -1,0 +1,13 @@
+node_modules/
+dist/
+artifacts/
+*.vsix
+.env
+.env.*
+!.env.example
+.research/
+.live/
+.posit/
+*.log
+*.tmp
+*.credentials.json
