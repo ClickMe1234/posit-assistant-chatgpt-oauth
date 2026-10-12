@@ -122,6 +122,30 @@ export class OAuthManager {
   }
   private async readVault(): Promise<Vault> { return JSON.parse(await this.secrets.get(VAULT_KEY) ?? '{"sessions":{}}'); }
   private async saveVault(vault: Vault) { if (!Object.keys(vault.sessions).length) await this.secrets.delete(VAULT_KEY); else await this.secrets.store(VAULT_KEY, JSON.stringify(vault)); }
+  async importSession(value: any): Promise<void> {
+    const epoch = this.epoch;
+    if (!value || typeof value.clientId !== 'string' || !value.clientId.startsWith('oaiapp_') ||
+      typeof value.subject !== 'string' || !value.subject || !['accessToken', 'refreshToken', 'idToken'].every(key => typeof value[key] === 'string' && value[key].length > 0) ||
+      !Number.isFinite(value.expiresAt) || value.expiresAt <= Date.now() || !Array.isArray(value.scopes) || !value.scopes.every((scope: any) => typeof scope === 'string') || !value.scopes.includes(DIRECT_SCOPE))
+      throw new BridgeError(400, 'invalid_imported_session', 'The transferred session is expired or lacks ChatGPT plan permission. Authorize a new Workbench request on your PC.');
+    let identity: JWTPayload;
+    try { identity = await this.verifier(value.idToken, value.clientId); }
+    catch { throw new BridgeError(400, 'invalid_id_token', 'The transferred ID token failed signature, issuer, audience or expiry validation.'); }
+    if (identity.sub !== value.subject) throw new BridgeError(400, 'account_mismatch', 'The transferred account does not match its verified ID token.');
+    const session: Session = { clientId: value.clientId, subject: value.subject,
+      email: typeof identity.email === 'string' ? identity.email : undefined,
+      accessToken: value.accessToken, refreshToken: value.refreshToken, idToken: value.idToken,
+      expiresAt: Math.min(value.expiresAt, Date.now() + 3600_000), scopes: value.scopes };
+    await this.lock(async () => {
+      if (epoch !== this.epoch) throw new BridgeError(409, 'sign_in_cancelled', 'Account state changed during import.');
+      const registrations = this.registrations(); const known = registrations.find(item => item.clientId === session.clientId);
+      if (known && known.subject !== session.subject) throw new BridgeError(400, 'account_mismatch', 'Import changed a saved registration identity.');
+      const vault = await this.readVault(); vault.sessions[session.clientId] = session; vault.active = session.clientId;
+      await this.state.update('registrations', [...registrations.filter(item => item.clientId !== session.clientId), { clientId: session.clientId, subject: session.subject, email: session.email }]);
+      // Keep this runtime's host ID. Never import the laptop's global state.
+      await this.saveVault(vault);
+    });
+  }
   registrations(): Registration[] { return this.state.get<Registration[]>('registrations', []); }
   async active(): Promise<Session | undefined> { const vault = await this.readVault(); return vault.active ? vault.sessions[vault.active] : undefined; }
   async hostId(): Promise<string> {

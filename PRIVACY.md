@@ -10,6 +10,8 @@ The extension has no telemetry or analytics service. GitHub, Positron, Assistant
 
 ## Local storage
 
+For Positron Pro on Workbench, “local” means the extension's server runtime and the SecretStorage supplied by Positron Pro. With the user's authorization, Workbench retains its own ChatGPT session and performs token renewal. The one-time PC helper creates a dedicated server-host OAuth authorization in memory; it does not copy another application's credentials or export the normal desktop session. A public request file contains the server host ID and public key. The session file is encrypted with AES-256-GCM and its key is wrapped with RSA-OAEP-SHA256; only the matching pending private key in Workbench SecretStorage can decrypt it. The pending private key is deleted after successful import or sign-out; expired keys are discarded on the next activation or request replacement. Transfer files are user-selected and should be deleted after successful import. Fully privileged Workbench administrators can access server resources; SecretStorage does not promise protection against them. See [WORKBENCH.md](WORKBENCH.md).
+
 - OAuth access, refresh and ID tokens are stored together in VS Code/Positron SecretStorage.
 - The random local bridge credential is kept in SecretStorage. Positron's authentication component securely stores its own copy so Assistant can authenticate to the bridge.
 - The host UUID, account email, verified subject, issued client ID and selected registration are stored in extension global state. They are identifiers, not access credentials; the host/client mapping is retained after sign-out for reauthorization.

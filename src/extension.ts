@@ -7,6 +7,7 @@ import { OAuthBridge } from './bridge';
 import { BridgeError, safeError } from './errors';
 import { backupConfig, PROVIDER_NAME, readConfig, updateOwnedProvider } from './config';
 import { UsageIndicator, showWelcomeOnce } from './usage';
+import { WorkbenchSignIn } from './workbench';
 
 const USAGE = 'https://chatgpt.com/#settings/Usage';
 const BRIDGE_SECRET = 'bridge.credential.v1';
@@ -49,7 +50,20 @@ export async function activate(context: vscode.ExtensionContext) {
     output.appendLine(`Discovered ${models.length} account-specific models: ${models.map(model => model.slug).join(', ')}`);
     return models;
   };
+  const finishSignIn = async () => {
+    await updateBar();
+    const session = await auth.active();
+    if (!session?.scopes.includes(DIRECT_SCOPE)) throw new BridgeError(403, 'plan_permission_missing', 'Signed in, but ChatGPT plan use was not enabled. Continue with ChatGPT again to request consent.');
+    await showWelcomeOnce(context.globalState, async () => {
+      const action = await vscode.window.showInformationMessage('You’re using your ChatGPT plan', { modal: true, detail: 'Eligible requests through ChatGPT OAuth use your ChatGPT plan or credits balance. Plan and app limits apply. Select ChatGPT OAuth (local) in Posit Assistant to use this connection. Manage usage in ChatGPT settings.' }, 'Got it', 'Manage usage');
+      return action === 'Manage usage' ? 'usage' : undefined;
+    }, () => vscode.env.openExternal(vscode.Uri.parse(USAGE)));
+    const models = await discover();
+    return { account: session.email ?? 'ChatGPT account', models: models.map(model => ({ slug: model.slug, displayName: model.display_name })) };
+  };
+  const workbench = new WorkbenchSignIn(context, auth, () => bridge?.cancelAll(), finishSignIn);
   const signIn = async () => {
+    if (workbench.remote) return workbench.start();
     const choices = auth.registrations(); let registration: Registration | undefined;
     if (choices.length) {
       const picked = await vscode.window.showQuickPick([
@@ -60,19 +74,12 @@ export async function activate(context: vscode.ExtensionContext) {
       registration = picked.registration;
     }
     bridge?.cancelAll();
-    const session = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: 'Complete sign-in and plan consent in your browser', cancellable: true }, async (_, token) => {
+    await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: 'Complete sign-in and plan consent in your browser', cancellable: true }, async (_, token) => {
       const controller = new AbortController(); const listener = token.onCancellationRequested(() => controller.abort());
       try { return await auth.signIn(url => vscode.env.openExternal(vscode.Uri.parse(url)), registration, controller.signal); }
       finally { listener.dispose(); }
     });
-    await updateBar();
-    if (!session.scopes.includes(DIRECT_SCOPE)) throw new BridgeError(403, 'plan_permission_missing', 'Signed in, but ChatGPT plan use was not enabled. Continue with ChatGPT again to request consent.');
-    await showWelcomeOnce(context.globalState, async () => {
-      const action = await vscode.window.showInformationMessage('You’re using your ChatGPT plan', { modal: true, detail: 'Eligible requests through ChatGPT OAuth use your ChatGPT plan or credits balance. Plan and app limits apply. Select ChatGPT OAuth (local) in Posit Assistant to use this connection. Manage usage in ChatGPT settings.' }, 'Got it', 'Manage usage');
-      return action === 'Manage usage' ? 'usage' : undefined;
-    }, () => vscode.env.openExternal(vscode.Uri.parse(USAGE)));
-    const models = await discover();
-    return { account: session.email ?? 'ChatGPT account', models: models.map(model => ({ slug: model.slug, displayName: model.display_name })) };
+    return finishSignIn();
   };
   const verifyStream = async (selectedModel?: string) => {
     const activeBridge = await ensureBridge(); const models = await activeBridge.models();
@@ -90,10 +97,9 @@ export async function activate(context: vscode.ExtensionContext) {
   };
   const authExtension = async () => {
     const extension = vscode.extensions.getExtension('positron.authentication');
-    if (!extension) throw new BridgeError(501, 'positron_required', 'This prototype requires Positron with the bundled authentication extension.');
-    await extension.activate();
+    if (extension) await extension.activate();
     const commands = await vscode.commands.getCommands(true);
-    if (!commands.includes('authentication.addCustomProvider') || !commands.includes('authentication.removeCustomProvider')) throw new BridgeError(501, 'provider_api_unavailable', 'This Positron release lacks the add/remove custom-provider command contract. See the feasibility report.');
+    if (!commands.includes('authentication.addCustomProvider') || !commands.includes('authentication.removeCustomProvider')) throw new BridgeError(501, 'provider_api_unavailable', 'This Positron or Positron Pro release lacks the add/remove custom-provider commands. A compatible Positron 2026.09+ build with its authentication component is required; check the IDE version with your Workbench administrator.');
   };
   const connectAssistant = async () => {
     await authExtension(); const activeBridge = await ensureBridge(); const models = await discover();
@@ -125,6 +131,7 @@ export async function activate(context: vscode.ExtensionContext) {
   };
   const signOut = async () => {
     bridge?.cancelAll();
+    await workbench.clear();
     let cleanupError: unknown;
     try { await disconnectAssistant(); } catch (error) { cleanupError = error; }
     const confirmed = await auth.signOut(true);
@@ -139,7 +146,7 @@ export async function activate(context: vscode.ExtensionContext) {
     const session = await auth.active();
     return { signedIn: Boolean(session), planPermission: session?.scopes.includes(DIRECT_SCOPE) ?? false,
       account: session?.email, registration: session?.clientId, expiresAt: session?.expiresAt ? new Date(session.expiresAt).toISOString() : undefined,
-      runtime: process.platform, architecture: process.arch, remoteName: vscode.env.remoteName ?? null,
+      runtime: process.platform, architecture: process.arch, remoteName: vscode.env.remoteName ?? null, hosting: workbench.remote ? 'server' : 'desktop',
       appName: vscode.env.appName, vscodeVersion: vscode.version, assistantVersion: vscode.extensions.getExtension('posit.assistant')?.packageJSON.version,
       credentialStorage: { oauthPresent: Boolean(await context.secrets.get('oauth.sessions.v1')), bridgePresent: Boolean(await context.secrets.get(BRIDGE_SECRET)) },
       bridge: bridge?.baseUrl ?? null, providerConfigured: context.globalState.get('ownsProvider', false),
@@ -159,10 +166,14 @@ export async function activate(context: vscode.ExtensionContext) {
   command('chatgptOAuth.verifyStream', verifyStream); command('chatgptOAuth.connectAssistant', connectAssistant); command('chatgptOAuth.disconnectAssistant', disconnectAssistant);
   command('chatgptOAuth.status', async () => { output.appendLine(JSON.stringify(await status(), null, 2)); output.show(); const action = await vscode.window.showInformationMessage('ChatGPT Plan connection details are in the output panel.', 'Manage usage'); if (action) await vscode.env.openExternal(vscode.Uri.parse(USAGE)); });
   command('chatgptOAuth.manageUsage', async () => vscode.env.openExternal(vscode.Uri.parse(USAGE)));
+  command('chatgptOAuth.prepareWorkbench', () => workbench.prepare());
+  command('chatgptOAuth.authorizeWorkbench', () => workbench.authorize());
+  command('chatgptOAuth.importWorkbench', () => workbench.import());
   context.subscriptions.push(output, bar, { dispose: () => { disposed = true; auth.dispose(); void bridge?.stop(); } }, context.secrets.onDidChange(event => { if (event.key === 'oauth.sessions.v1') void updateBar(); }));
   context.subscriptions.push(vscode.window.registerUriHandler({ handleUri: async uri => { const action = ({ '/sign-in': 'chatgptOAuth.signIn', '/status': 'chatgptOAuth.status', '/connect': 'chatgptOAuth.connectAssistant' } as Record<string, string>)[uri.path]; if (action && !uri.query) await vscode.commands.executeCommand(action); } }));
   shutdown = async () => { disposed = true; auth.dispose(); await bridge?.stop(); };
   await updateBar();
+  await workbench.clearExpired();
   if (await auth.active()) {
     try {
       const activeBridge = await ensureBridge();

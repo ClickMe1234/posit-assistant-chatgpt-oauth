@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.0
+
+- Permit the Node workspace extension host for Positron Pro on Workbench while preserving the desktop UI-host preference.
+- Add Prepare Workbench Sign-In, Authorize Workbench on This PC, and Import Workbench Sign-In commands. A dedicated local OAuth authorization is encrypted to a one-time server public key using RSA-3072/OAEP-SHA256 and AES-256-GCM.
+- Validate imported identity, permission and expiry, preserve the server host ID, and let the server own later refreshes. Existing desktop sessions are not exported or shared.
+- Delete the one-time transfer key after import or sign-out and reject replay, wrong-installation, expired and modified files.
+- Feature-detect custom-provider commands without requiring the desktop authentication-extension ID. Add Workbench instructions and explicit verification limits.
+- Workbench integration has mocked-network and local cryptographic coverage; live Positron Pro server verification remains outstanding.
+
 ## 0.2.1
 
 - Enable image attachments and plot/tool-result images for discovered GPT-6 and GPT-5.6 model families. Preserve inline image content in Responses requests.

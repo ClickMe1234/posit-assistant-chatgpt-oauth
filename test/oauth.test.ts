@@ -16,6 +16,49 @@ function fixture(responder: (url: string, init?: RequestInit) => Promise<Respons
 function tokenResponse(nonce: string, subject = 'subject-1', scopes = DIRECT_SCOPE, expires = 3600) {
   return { access_token: 'mock-access', refresh_token: 'mock-refresh', id_token: JSON.stringify({ sub: subject, nonce, email: 'test@example.invalid' }), token_type: 'Bearer', expires_in: expires, scope: scopes };
 }
+
+test('Workbench import verifies identity and permission, preserves its own host ID, and owns subsequent refresh/revocation', async () => {
+  let refreshed = false; let revoked = false;
+  const { manager, state, secrets } = fixture(async (url, init) => {
+    if (url.endsWith('/.well-known/openid-configuration')) return Response.json({ issuer: ISSUER, jwks_uri: `${ISSUER}/jwks`, revocation_endpoint: `${ISSUER}/revoke` });
+    if (url.endsWith('/revoke')) { revoked = true; return new Response('', { status: 200 }); }
+    refreshed = true; assert.equal((init!.body as URLSearchParams).get('refresh_token'), 'synthetic-refresh');
+    return Response.json({ access_token: 'synthetic-renewed', refresh_token: 'synthetic-rotated', token_type: 'Bearer', expires_in: 3600 });
+  });
+  const host = await manager.hostId();
+  const imported = { clientId: 'oaiapp_remote', subject: 'remote-user', accessToken: 'synthetic-access', refreshToken: 'synthetic-refresh', idToken: JSON.stringify({ sub: 'remote-user', email: 'remote@example.invalid' }), expiresAt: Date.now() + 3600_000, scopes: [DIRECT_SCOPE], hostId: 'must-not-import-laptop-host' };
+  await manager.importSession(imported); assert.equal(await manager.hostId(), host); assert.equal(state.get('hostId'), host);
+  assert.equal((await manager.active())?.subject, 'remote-user'); assert.equal((await manager.active() as any).hostId, undefined);
+  for (const bad of [{ ...imported, scopes: [] }, { ...imported, subject: 'wrong-user' }, { ...imported, expiresAt: 1 }, { ...imported, idToken: 'not a verified token' }]) await assert.rejects(() => manager.importSession(bad));
+  assert.equal((await manager.active())?.subject, 'remote-user');
+  assert.equal(await manager.accessToken(true), 'synthetic-renewed'); assert.equal(refreshed, true);
+  assert.equal(await manager.signOut(true), true); assert.equal(revoked, true); assert.equal(secrets.size, 0);
+});
+
+test('Workbench import verifies actual JWT signatures, issuer, audience and expiry before persisting', async () => {
+  const keys = await generateKeyPair('RS256'); const foreign = await generateKeyPair('RS256');
+  const secretValues = new Map<string, string>(); const stateValues = new Map<string, any>();
+  const secrets: SecretStore = { get: async key => secretValues.get(key), store: async (key, value) => { secretValues.set(key, value); }, delete: async key => { secretValues.delete(key); } };
+  const state: StateStore = { get: <T>(key: string, fallback: T) => stateValues.get(key) ?? fallback, update: async (key, value) => { stateValues.set(key, value); } };
+  const manager = new OAuthManager(secrets, state, 'unused', { lock: async action => action(), verify: (token, client) => verifyIdToken(token, client, keys.publicKey) });
+  const sign = (issuer = ISSUER, audience = 'oaiapp_remote', expiry = '1h', key = keys.privateKey) => new SignJWT({}).setProtectedHeader({ alg: 'RS256' }).setSubject('remote-user').setIssuer(issuer).setAudience(audience).setIssuedAt().setExpirationTime(expiry).sign(key);
+  const base = { clientId: 'oaiapp_remote', subject: 'remote-user', accessToken: 'synthetic-access', refreshToken: 'synthetic-refresh', expiresAt: Date.now() + 3600_000, scopes: [DIRECT_SCOPE] };
+  for (const idToken of [await sign('https://wrong.invalid'), await sign(ISSUER, 'wrong-audience'), await sign(ISSUER, 'oaiapp_remote', '-1h'), await sign(ISSUER, 'oaiapp_remote', '1h', foreign.privateKey)]) {
+    await assert.rejects(() => manager.importSession({ ...base, idToken }), /ID token/); assert.equal(secretValues.size, 0);
+  }
+  await manager.importSession({ ...base, idToken: await sign() }); assert.equal((await manager.active())?.subject, 'remote-user');
+});
+
+test('sign-out while an imported ID token is being verified cannot restore credentials', async () => {
+  let release!: () => void; let started!: () => void;
+  const entered = new Promise<void>(resolve => { started = resolve; }); const pending = new Promise<void>(resolve => { release = resolve; });
+  const secrets = new Map<string, string>(); const state = new Map<string, any>();
+  const manager = new OAuthManager({ get: async key => secrets.get(key), store: async (key, value) => { secrets.set(key, value); }, delete: async key => { secrets.delete(key); } },
+    { get: <T>(key: string, fallback: T) => state.get(key) ?? fallback, update: async (key, value) => { state.set(key, value); } }, 'unused',
+    { lock: async action => action(), verify: async () => { started(); await pending; return { sub: 'remote-user' }; } });
+  const importing = manager.importSession({ clientId: 'oaiapp_remote', subject: 'remote-user', accessToken: 'synthetic-access', refreshToken: 'synthetic-refresh', idToken: 'synthetic-id', expiresAt: Date.now() + 3600_000, scopes: [DIRECT_SCOPE] });
+  await entered; await manager.signOut(true); release(); await assert.rejects(() => importing, /changed during import/); assert.equal(secrets.size, 0);
+});
 async function authenticate(manager: OAuthManager, nonce: string) {
   const pending = makePending('http://127.0.0.1:12345/auth/callback'); pending.nonce = nonce;
   return manager.exchange(pending, new URL(`${pending.redirectUri}?code=mock-code&state=${pending.state}&client_id=oaiapp_mock`));

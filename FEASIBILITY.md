@@ -1,5 +1,13 @@
 # Feasibility inspection — 9 October 2026
 
+## Workbench update — 12 October 2026
+
+Posit's [Positron Pro extension documentation](https://docs.posit.co/ide/server-pro/user/positron/guide/extensions.html) describes extensions installed into the server session. The previous UI-only extension-host declaration prevented this package from running there. Version 0.3.0 permits a Node workspace host while preferring a local UI host on desktop. It detects custom-provider commands rather than requiring a particular desktop authentication-extension ID.
+
+OpenAI's [sign-in documentation](https://developers.openai.com/siwc/token-sharing-open-source/sign-in) requires a loopback callback. A Workbench browser and extension do not share loopback. Its [self-hosted VM guidance](https://developers.openai.com/siwc/token-sharing-open-source/self-hosted-vms) documents local authorization and protected credential transfer, retaining the remote host ID and letting that host manage refreshes. Version 0.3.0 implements an encrypted, one-time transfer between installations of this same extension; no public callback URL, private backend endpoint, credential sharing between active desktop/server clients or separately billed API key is introduced. The user explicitly authorized storing the session in their Workbench account.
+
+This is a source-backed design with automated tests, not a live Workbench compatibility claim. The actual Positron Pro version, custom-provider commands, SecretStorage backend, outbound networking and Assistant/bridge co-location still need verification on the user's deployment. RStudio and generic VS Code sessions are not substituted for Positron Pro.
+
 ## Installed environment
 
 - Windows 11 Pro, 64-bit, OS build 10.0.26200.

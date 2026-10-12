@@ -1,6 +1,12 @@
 # Verification status
 
-Updated 9 October 2026. This document distinguishes local mocked checks from live subscription verification.
+Updated 12 October 2026. This document distinguishes local mocked checks from live subscription verification.
+
+## Workbench release 0.3.0
+
+The server-host declaration, encrypted sign-in handoff and imported-session lifecycle have automated coverage. All **46 tests** pass, including real RSA-OAEP/AES-GCM encryption, tamper/expiry/host/key checks, one-time import, actual JWT signature/issuer/audience/expiry verification on import, sign-out/import races, preservation of the server host ID, mocked refresh/revocation and desktop/server host selection. TypeScript checks and VSIX packaging pass. The complete suite uses mocked OpenAI network responses. Local loopback HTTP and file-rename checks required execution outside the development sandbox; no test exemptions or weakening were added.
+
+**Not yet live-verified:** a real Positron Pro Workbench installation, its SecretStorage, its custom-provider commands, fresh PC-to-Workbench OAuth handoff, live server inference, tools or sign-out. The user identified the IDE as Positron Pro but did not supply its version or exact desktop-only error. These checks must be completed on that deployment using WORKBENCH.md. Historical desktop live checks below do not establish Workbench compatibility.
 
 ## Release provenance
 

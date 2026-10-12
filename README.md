@@ -8,7 +8,9 @@ An MIT-licensed local prototype that connects **Posit Assistant** to the documen
 
 ## Install and use
 
-1. Download `posit-assistant-chatgpt-oauth-0.2.1.vsix` from this repository's [GitHub Releases](https://github.com/ClickMe1234/posit-assistant-chatgpt-oauth/releases). In Positron, run **Extensions: Install from VSIX** and choose it. Reload if requested. The predecessor integration was verified on Windows, Positron 2026.09.0 and Assistant 1.7.0; see the verification notes for the distinction between that live run and this release's automated tests.
+**Positron Pro in a browser on Posit Workbench:** use the [Workbench setup guide](WORKBENCH.md). Version 0.3.0 supports a server Node extension host and adds encrypted sign-in transfer from local Positron; normal desktop sign-in remains available. Workbench support is experimental and has not been live-verified on a server.
+
+1. Download `posit-assistant-chatgpt-oauth-0.3.0.vsix` from this repository's [GitHub Releases](https://github.com/ClickMe1234/posit-assistant-chatgpt-oauth/releases). In Positron, run **Extensions: Install from VSIX** and choose it. Reload if requested. The predecessor integration was verified on Windows, Positron 2026.09.0 and Assistant 1.7.0; see the verification notes for the distinction between that live run and this release's automated tests.
 2. Run **ChatGPT OAuth: Continue with ChatGPT**. Complete login, select your workspace and consent in the system browser. Returning accounts reuse their issued registration.
 3. Run **ChatGPT OAuth: Discover Account Models**, then **ChatGPT OAuth: Verify Subscription Stream**. A stream must reach `response.completed` to count as success.
 4. Run **ChatGPT OAuth: Connect Posit Assistant**. It backs up `~/.posit/ai/providers.json`, creates the dedicated **ChatGPT OAuth (local)** custom OpenAI provider, securely stores its random local credential through Positron's authentication command, and declares models from the authenticated account. Other providers remain in the file.
@@ -18,7 +20,7 @@ After first sign-in, a one-time modal explains plan usage and links to usage set
 
 **ChatGPT OAuth: Show Connection Status** opens diagnostics without tokens, but they can include your email, registration identifier and local paths. Review/redact them before sharing. **Manage Usage** opens ChatGPT's usage settings. Plan/app limits apply; there is no automatic fallback to separately billed API usage. A usage-limit failure offers **Manage usage** as its primary action.
 
-The extension runs in the local UI extension host (`extensionKind: ui`). The inspected machine is Windows 11; WSL is installed, but this integration is intended to run in Windows Positron. A remote Assistant host that cannot reach this PC's loopback bridge is outside the verified target.
+The extension prefers the local UI extension host on desktop and permits a Node workspace extension host on Workbench (`extensionKind: ["ui", "workspace"]`). In Workbench, the bridge and Assistant must share the same server loopback network. Browser sign-in is completed on your PC and transferred in an encrypted, installation-bound file; subsequent credentials and renewal belong to Workbench. See [WORKBENCH.md](WORKBENCH.md). The historical live target was Windows desktop; server support has automated coverage only.
 
 For normal use after the development probes, close the verification/development windows and reopen Positron normally. The installed extension starts its bridge using the saved session. Use one window with this provider at a time, and select **ChatGPT OAuth (local)** in Assistant's model picker.
 

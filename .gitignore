@@ -11,3 +11,4 @@ artifacts/
 *.log
 *.tmp
 *.credentials.json
+chatgpt-oauth-workbench-*.json

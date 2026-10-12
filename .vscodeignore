@@ -13,3 +13,4 @@ tsconfig.json
 .github/**
 .env
 .env.*
+chatgpt-oauth-workbench-*.json
