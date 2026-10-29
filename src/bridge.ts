@@ -5,9 +5,10 @@ import { adaptEvent, adaptRequest } from './adapter';
 import { BridgeError, safeError, upstreamError } from './errors';
 import { encodeEvent, events } from './sse';
 import { ResponseHistory } from './history';
+import { applyReasoning, type ReasoningEffort, type ReasoningSource } from './reasoning';
 
 export interface AccountModel { slug: string; display_name: string; visibility: string; context_window?: number; [key: string]: any; }
-export interface RequestReceipt { sequence: number; source: 'assistant' | 'verification'; model: string; inputItems: number; userMessages: number; functionOutputs: number; inputImages: number; resolvedReferences: number; tools: number; toolCalls: number; textDeltas: number; completed: boolean; cancelled: boolean; errorCode?: string; errorParam?: string; upstreamStatus?: number; upstreamContentType?: string; requestId?: string; }
+export interface RequestReceipt { sequence: number; source: 'assistant' | 'verification'; model: string; reasoningEffort?: ReasoningEffort; reasoningSource?: ReasoningSource; inputItems: number; userMessages: number; functionOutputs: number; inputImages: number; resolvedReferences: number; tools: number; toolCalls: number; textDeltas: number; completed: boolean; cancelled: boolean; errorCode?: string; errorParam?: string; upstreamStatus?: number; upstreamContentType?: string; requestId?: string; }
 
 function imageCount(input: any[]): number {
   return input.reduce((count, item) => count + [item.content, item.output].reduce((sum, parts) =>
@@ -72,7 +73,9 @@ export class OAuthBridge {
       controller.signal.throwIfAborted();
       const catalog = await this.models(controller.signal);
       if ((await this.auth.active())?.clientId !== session.clientId) throw new BridgeError(409, 'account_changed', 'The active account changed during request preparation. Retry in a new Assistant chat.');
-      if (!catalog.some(model => model.slug === adapted.model)) throw new BridgeError(400, 'model_unavailable', 'Select a model discovered for the current ChatGPT account.');
+      const model = catalog.find(model => model.slug === adapted.model);
+      if (!model) throw new BridgeError(400, 'model_unavailable', 'Select a model discovered for the current ChatGPT account.');
+      Object.assign(receipt, applyReasoning(adapted, model));
       const response = await this.authorizedFetch(`${RESOURCE}/responses`, { method: 'POST', body: JSON.stringify(adapted), signal: controller.signal });
       receipt.upstreamStatus = response.status;
       receipt.upstreamContentType = response.headers.get('content-type') ?? '(absent)';

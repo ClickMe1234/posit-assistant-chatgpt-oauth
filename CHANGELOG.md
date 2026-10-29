@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.0
+
+- Enable Posit Assistant's native thinking-level selector for account models through `thinkingEffortLevels` metadata. Prefer account-specific choices, with documented fallbacks for existing GPT-6 and GPT-5.6 families; exclude unsupported agent-only modes.
+- Preserve explicit thinking selections and reasoning options across Responses requests. Send known model defaults explicitly when no level was selected, and reject unsupported levels before contacting inference.
+- Show the sent thinking level during admitted requests, retain the last Assistant request's level while idle, and include the effort and selection source in token-free receipts. Unknown service defaults are labeled as unreported.
+- Automatically back up and migrate existing provider metadata, preserving disabled state and unrelated providers. Start a new Assistant chat after upgrading.
+- Add automated tests for native model metadata, migration, defaults, validation, HTTP request forwarding, changing levels across turns and concurrent status display. No new live inference or UI verification is claimed.
+
 ## 0.3.0
 
 - Permit the Node workspace extension host for Positron Pro on Workbench while preserving the desktop UI-host preference.

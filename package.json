@@ -2,7 +2,7 @@
   "name": "posit-assistant-chatgpt-oauth",
   "displayName": "Posit Assistant ChatGPT OAuth",
   "description": "Use your ChatGPT plan in Posit Assistant through documented browser sign-in and a loopback Responses bridge.",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "publisher": "clickme1234",
   "license": "MIT",
   "engines": {
@@ -25,7 +25,7 @@
     "build": "node scripts/build.mjs",
     "check": "tsc --noEmit",
     "test": "tsx --test test/*.test.ts",
-    "package": "npm run build && vsce package --no-dependencies --allow-missing-repository -o artifacts/posit-assistant-chatgpt-oauth-0.3.0.vsix"
+    "package": "npm run build && vsce package --no-dependencies --allow-missing-repository -o artifacts/posit-assistant-chatgpt-oauth-0.4.0.vsix"
   },
   "contributes": {
     "commands": [

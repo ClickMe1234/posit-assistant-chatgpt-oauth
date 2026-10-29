@@ -31,7 +31,7 @@ test('account model families expose image attachments and plot results, unknown 
   assert.equal(models.at(-1)!.supportsImages, false); assert.equal(models.at(-1)!.supportsToolResultImages, false);
 });
 
-test('metadata migration backs up old image flags and preserves disabled/unrelated providers', async () => {
+test('metadata migration adds thinking choices, backs up old flags and preserves disabled/unrelated providers', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'positron-image-migration-'));
   const path = join(directory, 'providers.json'); const baseUrl = 'http://127.0.0.1:17864/v1';
   const raw = JSON.stringify({ providers: { custom: { [PROVIDER_NAME]: { type: 'openai', baseUrl, enabled: false, models: { custom: [{ id: 'gpt-6.1-sol', supportsImages: false }] } }, Other: { type: 'anthropic', enabled: true } } } });
@@ -41,9 +41,21 @@ test('metadata migration backs up old image flags and preserves disabled/unrelat
     assert.equal(await readFile(backup, 'utf8'), raw);
     const config = JSON.parse(await readFile(path, 'utf8'));
     assert.equal(config.providers.custom[PROVIDER_NAME].models.custom[0].supportsToolResultImages, true);
+    assert.deepEqual(config.providers.custom[PROVIDER_NAME].models.custom[0].thinkingEffortLevels, ['low', 'medium', 'high', 'xhigh', 'max']);
     assert.equal(config.providers.custom[PROVIDER_NAME].enabled, false);
     assert.deepEqual(config.providers.custom.Other, { type: 'anthropic', enabled: true });
   } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+test('provider metadata enables native thinking controls using account-specific levels', () => {
+  const models = modelSettings([
+    { slug: 'gpt-6.1-sol', display_name: 'Sol', visibility: 'list', supported_reasoning_levels: [{ effort: 'low' }, { effort: 'high' }] },
+    { slug: 'gpt-6-luna', display_name: 'Luna', visibility: 'list' },
+    { slug: 'unknown', display_name: 'Unknown', visibility: 'list' }
+  ]);
+  assert.deepEqual(models[0].thinkingEffortLevels, ['low', 'high']);
+  assert.deepEqual(models[1].thinkingEffortLevels, ['none', 'low', 'medium', 'high', 'xhigh', 'max']);
+  assert.equal('thinkingEffortLevels' in models[2], false);
 });
 test('an endpoint/type conflict or invalid configuration is preserved', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'positron-plan-config-'));
