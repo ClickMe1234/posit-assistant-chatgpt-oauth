@@ -11,7 +11,7 @@ import { WorkbenchSignIn } from './workbench';
 
 const USAGE = 'https://chatgpt.com/#settings/Usage';
 const BRIDGE_SECRET = 'bridge.credential.v1';
-const PROVIDER_METADATA_VERSION = 1;
+const PROVIDER_METADATA_VERSION = 2;
 let shutdown: (() => Promise<void>) | undefined;
 
 export async function activate(context: vscode.ExtensionContext) {
@@ -181,14 +181,14 @@ export async function activate(context: vscode.ExtensionContext) {
         const { value } = await readConfig(configPath);
         const entry = value.providers?.custom?.[PROVIDER_NAME];
         if (entry) {
-          if (entry.type !== 'openai' || entry.baseUrl !== activeBridge.baseUrl) throw new BridgeError(409, 'provider_changed', 'The provider endpoint changed. Reconnect ChatGPT OAuth to update image support.');
+          if (entry.type !== 'openai' || entry.baseUrl !== activeBridge.baseUrl) throw new BridgeError(409, 'provider_changed', 'The provider endpoint changed. Reconnect ChatGPT OAuth to update model capabilities.');
           const models = await activeBridge.models();
           const backup = await backupConfig(configPath, context.globalStorageUri.fsPath);
           await context.globalState.update('lastProviderBackup', backup);
           await updateOwnedProvider(configPath, activeBridge.baseUrl, models, false);
           await context.globalState.update('providerMetadataVersion', PROVIDER_METADATA_VERSION);
-          output.appendLine('Updated the owned Assistant provider with image and plot capabilities; previous configuration was backed up.');
-          void vscode.window.showInformationMessage('ChatGPT OAuth image support is enabled. Start a new Assistant chat to use the updated model capabilities.');
+          output.appendLine('Updated the owned Assistant provider with image and thinking-level capabilities; previous configuration was backed up.');
+          void vscode.window.showInformationMessage('ChatGPT OAuth thinking levels are available. Start a new Assistant chat and choose a thinking level in the model picker.');
         }
       }
     } catch (error) { await handleError(error); }

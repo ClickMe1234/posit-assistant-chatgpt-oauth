@@ -2,6 +2,10 @@
 
 Updated 12 October 2026. This document distinguishes local mocked checks from live subscription verification.
 
+## Thinking-level release 0.4.0
+
+Automated tests cover account-specific thinking metadata, documented family fallbacks, unknown/empty capabilities, native picker metadata, migration backup and preservation, explicit and default effort forwarding, other reasoning options, rejected unsupported levels, HTTP requests that change levels across turns, diagnostic receipts and concurrent/idle/verification status display. OpenAI inference is mocked. TypeScript checking, all 54 tests and VSIX packaging pass locally on Windows. The installed Assistant 1.9.1 bundle was inspected for `thinkingEffortLevels` and Responses effort forwarding, but the new selector and inference have not been exercised in a live Positron session. Linux and Windows CI run the same check/test/package workflow.
+
 ## Workbench release 0.3.0
 
 The server-host declaration, encrypted sign-in handoff and imported-session lifecycle have automated coverage. All **46 tests** pass, including real RSA-OAEP/AES-GCM encryption, tamper/expiry/host/key checks, one-time import, actual JWT signature/issuer/audience/expiry verification on import, sign-out/import races, preservation of the server host ID, mocked refresh/revocation and desktop/server host selection. TypeScript checks and VSIX packaging pass. The complete suite uses mocked OpenAI network responses. Local loopback HTTP and file-rename checks required execution outside the development sandbox; no test exemptions or weakening were added.

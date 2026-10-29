@@ -3,6 +3,7 @@ import { dirname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type { AccountModel } from './bridge';
 import { BridgeError } from './errors';
+import { reasoningCapabilities } from './reasoning';
 
 export const PROVIDER_NAME = 'ChatGPT OAuth (local)';
 export async function readConfig(path: string): Promise<{ raw: string; value: any }> {
@@ -29,7 +30,9 @@ export function modelSettings(models: AccountModel[]) {
     // Match the image-capable account families recognized by Assistant 1.7.0.
     // Unknown models stay text-only; discovery is not a vision entitlement check.
     const images = /^gpt-6(?:[.-]|$)/.test(model.slug) || /^gpt-5\.6(?:-(?:sol|terra|luna)(?:-\d{4}-\d{2}-\d{2})?)?$/.test(model.slug);
+    const { levels } = reasoningCapabilities(model);
     return { id: model.slug, name: model.display_name, protocol: 'openai-responses', maxContextLength: context,
+      ...(levels ? { thinkingEffortLevels: levels } : {}),
       maxInputTokens: Math.max(4096, context - 8192), maxOutputTokens: 8192,
       supportsTools: true, supportsImages: images, supportsToolResultImages: images,
       supportedInputMediaTypes: images ? ['image/png', 'image/jpeg', 'image/gif', 'image/webp'] : [], supportsWebSearch: false };

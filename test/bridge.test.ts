@@ -7,6 +7,7 @@ import { OAuthBridge } from '../src/bridge';
 import { OAuthManager } from '../src/oauth';
 import { encodeEvent, events } from '../src/sse';
 import { upstreamError } from '../src/errors';
+import { UsageIndicator } from '../src/usage';
 
 async function freePort(): Promise<number> {
   const server = createServer(); await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
@@ -16,6 +17,42 @@ async function freePort(): Promise<number> {
 function fakeAuth() { return { active: async () => ({ clientId: 'oaiapp_mock' }), accessToken: async () => 'mock-oauth-token' } as unknown as OAuthManager; }
 function completed(output: any[] = []) { return { type: 'response.completed', response: { id: 'resp-mock', object: 'response', status: 'completed', output } }; }
 function sse(items: any[]) { return new Response(items.map(encodeEvent).join(''), { headers: { 'content-type': 'text/event-stream' } }); }
+
+test('native thinking selections reach Responses and usage receipts on successive HTTP turns', async () => {
+  const requests: any[] = []; const usage = new UsageIndicator();
+  const upstream = (async (url: string, init: RequestInit) => {
+    if (url.endsWith('/models')) return Response.json({ models: [{ slug: 'gpt-6.1-sol', display_name: 'Sol', visibility: 'list',
+      supported_reasoning_levels: [{ effort: 'low' }, { effort: 'medium' }, { effort: 'high' }], default_reasoning_level: 'medium' }] });
+    requests.push(JSON.parse(init.body as string));
+    return sse([completed()]);
+  }) as typeof fetch;
+  const levels: string[] = [];
+  const bridge = new OAuthBridge(fakeAuth(), 'local', await freePort(), upstream, () => {}, (receipt, active) => {
+    usage.setActive(receipt, active);
+    if (active) levels.push(usage.presentation(true, true).text);
+  });
+  await bridge.start();
+  try {
+    for (const effort of ['high', 'low', undefined]) {
+      const response = await fetch(`${bridge.baseUrl}/responses`, { method: 'POST', headers: { Authorization: 'Bearer local', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: 'gpt-6.1-sol', input: [{ role: 'user', content: 'private test prompt' }], reasoning: { effort, summary: 'detailed' } }) });
+      assert.equal(response.status, 200); await response.text();
+    }
+    assert.deepEqual(requests.map(request => request.reasoning), [
+      { effort: 'high', summary: 'detailed' }, { effort: 'low', summary: 'detailed' }, { effort: 'medium', summary: 'detailed' }
+    ]);
+    assert.deepEqual(bridge.receipts.map(receipt => [receipt.reasoningEffort, receipt.reasoningSource]), [['high', 'assistant'], ['low', 'assistant'], ['medium', 'model-default']]);
+    assert.match(levels[0], /Thinking: High/); assert.match(levels[1], /Thinking: Low/); assert.match(levels[2], /Thinking: Medium/);
+    assert.ok(!JSON.stringify(bridge.receipts).includes('private test prompt'));
+    for (const effort of ['none', 'max', 'ultra']) {
+      const response = await fetch(`${bridge.baseUrl}/responses`, { method: 'POST', headers: { Authorization: 'Bearer local', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: 'gpt-6.1-sol', input: [], reasoning: { effort } }) });
+      assert.equal(response.status, 400); assert.match((await response.json() as any).error.code, /reasoning_effort/);
+    }
+    assert.equal(requests.length, 3);
+    assert.match(usage.presentation(true, true).text, /Last thinking: Medium/);
+  } finally { await bridge.stop(); }
+});
 
 test('real loopback HTTP server requires local credential and rejects browser origins/Host attacks', async () => {
   const key = randomBytes(32).toString('base64url');
