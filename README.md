@@ -10,7 +10,7 @@ An MIT-licensed local prototype that connects **Posit Assistant** to the documen
 
 **Positron Pro in a browser on Posit Workbench:** use the [Workbench setup guide](WORKBENCH.md). Version 0.3.0 supports a server Node extension host and adds encrypted sign-in transfer from local Positron; normal desktop sign-in remains available. Workbench support is experimental and has not been live-verified on a server.
 
-1. Download the latest published VSIX from this repository's [GitHub Releases](https://github.com/ClickMe1234/posit-assistant-chatgpt-oauth/releases), or build this version with `npm ci` followed by `npm run package` to produce `artifacts/posit-assistant-chatgpt-oauth-0.4.0.vsix`. In Positron, run **Extensions: Install from VSIX** and choose it. Reload if requested. The predecessor integration was verified on Windows, Positron 2026.09.0 and Assistant 1.7.0; see the verification notes for the distinction between that live run and this release's automated tests.
+1. Download the latest published VSIX from this repository's [GitHub Releases](https://github.com/ClickMe1234/posit-assistant-chatgpt-oauth/releases), or build this version with `npm ci` followed by `npm run package` to produce `artifacts/posit-assistant-chatgpt-oauth-0.5.0.vsix`. In Positron, run **Extensions: Install from VSIX** and choose it. Reload if requested. The predecessor integration was verified on Windows, Positron 2026.09.0 and Assistant 1.7.0; see the verification notes for the distinction between that live run and this release's automated tests.
 2. Run **ChatGPT OAuth: Continue with ChatGPT**. Complete login, select your workspace and consent in the system browser. Returning accounts reuse their issued registration.
 3. Run **ChatGPT OAuth: Discover Account Models**, then **ChatGPT OAuth: Verify Subscription Stream**. A stream must reach `response.completed` to count as success.
 4. Run **ChatGPT OAuth: Connect Posit Assistant**. It backs up `~/.posit/ai/providers.json`, creates the dedicated **ChatGPT OAuth (local)** custom OpenAI provider, securely stores its random local credential through Positron's authentication command, and declares models from the authenticated account. Other providers remain in the file.
@@ -19,6 +19,12 @@ An MIT-licensed local prototype that connects **Posit Assistant** to the documen
 After first sign-in, a one-time modal explains plan usage and links to usage settings. The status bar says **Using ChatGPT plan** only while an admitted Assistant stream is active through this bridge; clicking it opens usage settings. A signed-in idle connection says **ChatGPT OAuth: ready**. Standalone stream checks say **Verifying ChatGPT plan**. This extension cannot read Assistant's selected model, so it does not claim that an idle Assistant is using this provider. Select **ChatGPT OAuth (local)** in the model picker to route requests here.
 
 **ChatGPT OAuth: Show Connection Status** opens diagnostics without tokens, but they can include your email, registration identifier and local paths. Review/redact them before sharing. **Manage Usage** opens ChatGPT's usage settings. Plan/app limits apply; there is no automatic fallback to separately billed API usage. A usage-limit failure offers **Manage usage** as its primary action.
+
+## Plan usage
+
+The status bar shows the last reported percentage left in each 5-hour or 7-day window when OpenAI includes Codex-format quota headers on a Responses reply. Hover to see when each balance was reported, its reset time if provided, and the token count for the last completed Assistant request. Missing window data is shown as unavailable. Use **Manage Usage** to check the plan and app limits in ChatGPT settings.
+
+**Show Connection Status** includes input, output and total tokens for each model request when Responses reports them. An Assistant turn that calls tools can make several model requests. When two readings share the same reset time, the addon shows the change in percentage points for the shared window. Other apps can affect that change, and the Responses token counts do not establish the percentage of the plan allowance used by an individual turn.
 
 ## Thinking levels
 

@@ -6,9 +6,10 @@ import { BridgeError, safeError, upstreamError } from './errors';
 import { encodeEvent, events } from './sse';
 import { ResponseHistory } from './history';
 import { applyReasoning, type ReasoningEffort, type ReasoningSource } from './reasoning';
+import { readPlanWindows, readResponseTokens, type PlanUsage, type PlanWindows, type ResponseTokenUsage } from './plan-usage';
 
 export interface AccountModel { slug: string; display_name: string; visibility: string; context_window?: number; [key: string]: any; }
-export interface RequestReceipt { sequence: number; source: 'assistant' | 'verification'; model: string; reasoningEffort?: ReasoningEffort; reasoningSource?: ReasoningSource; inputItems: number; userMessages: number; functionOutputs: number; inputImages: number; resolvedReferences: number; tools: number; toolCalls: number; textDeltas: number; completed: boolean; cancelled: boolean; errorCode?: string; errorParam?: string; upstreamStatus?: number; upstreamContentType?: string; requestId?: string; }
+export interface RequestReceipt { sequence: number; source: 'assistant' | 'verification'; model: string; reasoningEffort?: ReasoningEffort; reasoningSource?: ReasoningSource; inputItems: number; userMessages: number; functionOutputs: number; inputImages: number; resolvedReferences: number; tools: number; toolCalls: number; textDeltas: number; completed: boolean; cancelled: boolean; errorCode?: string; errorParam?: string; upstreamStatus?: number; upstreamContentType?: string; requestId?: string; tokenUsage?: ResponseTokenUsage; planWindows?: PlanWindows; }
 
 function imageCount(input: any[]): number {
   return input.reduce((count, item) => count + [item.content, item.output].reduce((sum, parts) =>
@@ -23,8 +24,12 @@ export class OAuthBridge {
   readonly receipts: RequestReceipt[] = [];
   private sequence = 0;
   private history = new ResponseHistory();
+  private usage?: { clientId: string; snapshot: PlanUsage };
   constructor(private auth: OAuthManager, private credential: string, readonly port: number, private fetcher: typeof fetch = fetch, private report: (receipt: RequestReceipt) => void = () => {}, private activity: (receipt: RequestReceipt, active: boolean) => void = () => {}) {}
   get baseUrl() { return `http://127.0.0.1:${this.port}/v1`; }
+  planUsage(clientId: string | undefined): PlanUsage | undefined {
+    return this.usage?.clientId === clientId ? this.usage?.snapshot : undefined;
+  }
   async models(signal?: AbortSignal, force = false): Promise<AccountModel[]> {
     const session = await this.auth.active();
     if (!session) throw new BridgeError(401, 'sign_in_required', 'Continue with ChatGPT first.');
@@ -61,6 +66,8 @@ export class OAuthBridge {
     const session = await this.auth.active();
     if (!session) throw new BridgeError(401, 'sign_in_required', 'Continue with ChatGPT first.');
     this.history.selectAccount(session.clientId);
+    if (this.usage?.clientId !== session.clientId) this.usage = { clientId: session.clientId, snapshot: { windows: {} } };
+    const usage = this.usage;
     const adapted = adaptRequest(request, this.history.resolve);
     const controller = new AbortController();
     const abort = () => controller.abort();
@@ -80,6 +87,13 @@ export class OAuthBridge {
       receipt.upstreamStatus = response.status;
       receipt.upstreamContentType = response.headers.get('content-type') ?? '(absent)';
       receipt.requestId = response.headers.get('x-request-id') ?? response.headers.get('openai-request-id') ?? undefined;
+      if (!controller.signal.aborted && this.usage === usage) {
+        const windows = readPlanWindows(response.headers, usage.snapshot.windows);
+        if (Object.keys(windows).length) {
+          receipt.planWindows = windows;
+          usage.snapshot.windows = { ...usage.snapshot.windows, ...windows };
+        }
+      }
       if (!response.ok) throw await upstreamError(response);
       if (!response.body) throw new BridgeError(502, 'stream_required', 'The subscription endpoint did not provide a response body.');
       this.activity(receipt, true);
@@ -92,6 +106,8 @@ export class OAuthBridge {
         const event = adaptEvent(raw);
         if (event.type === 'response.output_text.delta') receipt.textDeltas++;
         if (event.type === 'response.output_item.done' && ['function_call', 'custom_tool_call'].includes(event.item?.type)) receipt.toolCalls++;
+        if (['response.completed', 'response.incomplete', 'response.failed'].includes(event.type))
+          receipt.tokenUsage = readResponseTokens(event.response?.usage);
         if (event.type === 'response.failed' || event.type === 'error') {
           const error = await upstreamError(new Response(JSON.stringify({ error: event.response?.error ?? event.error ?? event }), { status: 400 }));
           throw error;
@@ -100,6 +116,8 @@ export class OAuthBridge {
         if (event.type === 'response.completed') {
           if (event.response?.status !== 'completed') throw new BridgeError(502, 'response_incomplete', 'OpenAI did not report a completed response.');
           terminal = true; receipt.completed = true;
+          if (source === 'assistant' && this.usage === usage)
+            usage.snapshot.lastAssistantResponse = { sequence: receipt.sequence, tokenUsage: receipt.tokenUsage };
         }
         yield event;
         if (terminal) break;
@@ -162,6 +180,6 @@ export class OAuthBridge {
     res.writeHead(error.status < 400 || error.status > 599 ? 500 : error.status, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ error: { type: 'bridge_error', code: error.code, message: error.message, param: error.param ?? null }, ...(error.bodyShape ? { upstream: { bodyShape: error.bodyShape } } : {}) }));
   }
-  cancelAll() { for (const controller of this.requests) controller.abort(); this.catalog = undefined; this.catalogPending = undefined; this.history.clear(); }
+  cancelAll() { for (const controller of this.requests) controller.abort(); this.catalog = undefined; this.catalogPending = undefined; this.history.clear(); this.usage = undefined; }
   async stop() { this.cancelAll(); const server = this.server; this.server = undefined; if (server) { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); } }
 }
