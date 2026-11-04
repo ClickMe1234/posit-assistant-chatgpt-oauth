@@ -22,6 +22,8 @@ After first sign-in, a one-time modal explains plan usage and links to usage set
 
 ## Plan usage
 
+When the direct connection shows unavailable balances, install the Codex CLI on the same host as the addon and sign in to Codex with ChatGPT. Run **ChatGPT OAuth: Refresh Codex Plan Balances** from Positron's Command Palette. Look for **Codex** on the right side of the status bar and hover to see the reset and refresh times. Run the command again for a fresh reading. It reports the signed-in Codex account's quota, so use the same ChatGPT account and workspace in both apps if you want to compare them. No credentials are passed from the addon to Codex.
+
 The status bar shows the last reported percentage left in each 5-hour or 7-day window when OpenAI includes Codex-format quota headers on a Responses reply. Hover to see when each balance was reported, its reset time if provided, and the token count for the last completed Assistant request. Missing window data is shown as unavailable. Use **Manage Usage** to check the plan and app limits in ChatGPT settings.
 
 **Show Connection Status** includes input, output and total tokens for each model request when Responses reports them. An Assistant turn that calls tools can make several model requests. When two readings share the same reset time, the addon shows the change in percentage points for the shared window. Other apps can affect that change, and the Responses token counts do not establish the percentage of the plan allowance used by an individual turn.

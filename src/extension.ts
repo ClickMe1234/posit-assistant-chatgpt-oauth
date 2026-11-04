@@ -8,6 +8,8 @@ import { BridgeError, safeError } from './errors';
 import { backupConfig, PROVIDER_NAME, readConfig, updateOwnedProvider } from './config';
 import { UsageIndicator, showWelcomeOnce } from './usage';
 import { WorkbenchSignIn } from './workbench';
+import { readCodexQuota } from './codex-quota';
+import { PLAN_WINDOWS, type PlanWindows } from './plan-usage';
 
 const USAGE = 'https://chatgpt.com/#settings/Usage';
 const BRIDGE_SECRET = 'bridge.credential.v1';
@@ -24,10 +26,21 @@ export async function activate(context: vscode.ExtensionContext) {
   let bridge: OAuthBridge | undefined;
   let disposed = false;
   let lastError: string | undefined;
+  let codexWindows: PlanWindows | undefined;
+  let codexRefresh: Promise<PlanWindows> | undefined;
   const updateBar = async () => {
     const active = await auth.active();
     const presentation = usage.presentation(Boolean(active), active?.scopes.includes(DIRECT_SCOPE) ?? false, bridge?.planUsage(active?.clientId));
-    bar.text = presentation.text; bar.command = presentation.command; bar.tooltip = presentation.tooltip; bar.show();
+    const readings = PLAN_WINDOWS.flatMap(window => {
+      const reading = codexWindows?.[window];
+      if (!reading) return [];
+      return [{ label: `${window} ${reading.remainingPercent.toLocaleString()}% left`, reading }];
+    });
+    bar.text = presentation.text + (readings.length ? ` · Codex ${readings.map(item => item.label).join(' · ')}` : '');
+    bar.tooltip = presentation.tooltip + (readings.length ? '\n\nCodex CLI account, last refreshed manually.\n' + readings.map(({ label, reading }) =>
+      `${label} · reported ${new Date(reading.observedAt).toLocaleString()}${reading.resetsAt ? ` · resets ${new Date(reading.resetsAt * 1000).toLocaleString()}` : ''}`).join('\n') : '\n\nRun ChatGPT OAuth: Refresh Codex Plan Balances to check the Codex CLI account.');
+    bar.command = presentation.command;
+    bar.show();
   };
   const ensureBridge = async () => {
     if (disposed) throw new BridgeError(503, 'extension_stopped', 'The extension is stopping.');
@@ -152,6 +165,7 @@ export async function activate(context: vscode.ExtensionContext) {
       bridge: bridge?.baseUrl ?? null, providerConfigured: context.globalState.get('ownsProvider', false),
       lastProviderBackup: context.globalState.get('lastProviderBackup', undefined), lastError,
       planUsage: bridge?.planUsage(session?.clientId) ?? null,
+      codexPlanWindows: codexWindows ?? null,
       receipts: bridge?.receipts.map(item => ({ ...item })) ?? [], usageUrl: USAGE };
   };
   const handleError = async (error: unknown) => {
@@ -168,6 +182,17 @@ export async function activate(context: vscode.ExtensionContext) {
   command('chatgptOAuth.verifyStream', verifyStream); command('chatgptOAuth.connectAssistant', connectAssistant); command('chatgptOAuth.disconnectAssistant', disconnectAssistant);
   command('chatgptOAuth.status', async () => { output.appendLine(JSON.stringify(await status(), null, 2)); output.show(); const action = await vscode.window.showInformationMessage('ChatGPT Plan connection details are in the output panel.', 'Manage usage'); if (action) await vscode.env.openExternal(vscode.Uri.parse(USAGE)); });
   command('chatgptOAuth.manageUsage', async () => vscode.env.openExternal(vscode.Uri.parse(USAGE)));
+  command('chatgptOAuth.refreshCodexQuota', async () => {
+    codexRefresh ??= readCodexQuota().finally(() => { codexRefresh = undefined; });
+    try {
+      codexWindows = await codexRefresh;
+    } catch {
+      codexWindows = undefined;
+      await updateBar();
+      throw new BridgeError(503, 'codex_quota_unavailable', 'Codex returned no quota readings. Check that the Codex CLI is installed on the Positron host and signed in with ChatGPT.');
+    }
+    await updateBar();
+  });
   command('chatgptOAuth.prepareWorkbench', () => workbench.prepare());
   command('chatgptOAuth.authorizeWorkbench', () => workbench.authorize());
   command('chatgptOAuth.importWorkbench', () => workbench.import());
