@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.0
+
+- Show the last reported 5-hour and 7-day plan balances and reset times when a Responses reply includes Codex-format quota headers.
+- Record input, output and total tokens from each model response. Show the last completed Assistant request’s token count in the status tooltip.
+- Show shared usage changes between readings from the same quota window. Exact per-request percentages of the plan allowance are unavailable.
+
 ## 0.4.0
 
 - Enable Posit Assistant's native thinking-level selector for account models through `thinkingEffortLevels` metadata. Prefer account-specific choices, with documented fallbacks for existing GPT-6 and GPT-5.6 families; exclude unsupported agent-only modes.

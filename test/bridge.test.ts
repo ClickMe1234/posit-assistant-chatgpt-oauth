@@ -18,6 +18,89 @@ function fakeAuth() { return { active: async () => ({ clientId: 'oaiapp_mock' })
 function completed(output: any[] = []) { return { type: 'response.completed', response: { id: 'resp-mock', object: 'response', status: 'completed', output } }; }
 function sse(items: any[]) { return new Response(items.map(encodeEvent).join(''), { headers: { 'content-type': 'text/event-stream' } }); }
 
+test('Assistant requests reuse reported plan windows and Responses token counts', async () => {
+  const reset = Math.floor(Date.now() / 1000) + 300;
+  let clientId = 'first-account';
+  const auth = { ...fakeAuth(), active: async () => ({ clientId }) } as OAuthManager;
+  const quota = (fiveHour: string, weekly?: string, resetsAt = reset) => ({
+    'x-codex-primary-window-minutes': '300',
+    'x-codex-primary-used-percent': fiveHour,
+    'x-codex-primary-reset-at': String(resetsAt),
+    ...(weekly && { 'x-codex-secondary-window-minutes': '10080', 'x-codex-secondary-used-percent': weekly }),
+  });
+  const headers = [
+    quota('20.25', '8'),
+    quota('21.5'),
+    quota('0', undefined, reset + 300),
+    quota('2', undefined, reset + 300),
+  ];
+  const upstream = (async (url: string) => {
+    if (url.endsWith('/models')) return Response.json({ models: [{ slug: 'm', display_name: 'M', visibility: 'list' }] });
+    const terminal = completed();
+    const usage = { input_tokens: 13, output_tokens: 7, total_tokens: 20 };
+    return new Response(encodeEvent({ ...terminal, response: { ...terminal.response, usage } }), {
+      headers: { 'content-type': 'text/event-stream', ...headers.shift() },
+    });
+  }) as typeof fetch;
+  const bridge = new OAuthBridge(auth, 'local', await freePort(), upstream);
+  await bridge.start();
+  try {
+    const send = async () => {
+      const response = await fetch(`${bridge.baseUrl}/responses`, {
+        method: 'POST',
+        headers: { Authorization: 'Bearer local', 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: 'm', input: [] }),
+      });
+      assert.equal(response.status, 200);
+      assert.match(await response.text(), /"total_tokens":20/);
+    };
+    await send();
+    assert.equal(bridge.planUsage(clientId)?.windows['5h']?.remainingPercent, 79.75);
+    assert.equal(bridge.planUsage(clientId)?.windows['7d']?.remainingPercent, 92);
+    assert.equal(bridge.receipts[0].planWindows?.['5h']?.sharedChangePoints, undefined);
+    await send();
+    assert.equal(bridge.receipts[1].planWindows?.['5h']?.sharedChangePoints, 1.25);
+    assert.equal(bridge.planUsage(clientId)?.windows['5h']?.remainingPercent, 78.5);
+    assert.equal(bridge.planUsage(clientId)?.windows['7d']?.remainingPercent, 92);
+    assert.deepEqual(bridge.receipts[1].tokenUsage, { inputTokens: 13, outputTokens: 7, totalTokens: 20 });
+    const presentation = new UsageIndicator().presentation(true, true, bridge.planUsage(clientId));
+    assert.match(presentation.text, /Last reported 5h .+% left · 7d 92% left/);
+    assert.match(presentation.tooltip, /shared usage change \+.+ percentage points/);
+    assert.match(presentation.tooltip, /Last completed Assistant request used 20 tokens/);
+    await send();
+    assert.equal(bridge.receipts[2].planWindows?.['5h']?.sharedChangePoints, undefined);
+    clientId = 'second-account';
+    assert.equal(bridge.planUsage(clientId), undefined);
+    await send();
+    assert.equal(bridge.receipts[3].planWindows?.['5h']?.sharedChangePoints, undefined);
+    assert.equal(bridge.planUsage(clientId)?.windows['7d'], undefined);
+    bridge.cancelAll();
+    assert.equal(bridge.planUsage(clientId), undefined);
+  } finally { await bridge.stop(); }
+});
+
+test('missing or invalid subscription readings stay unavailable even when API throughput headers are present', async () => {
+  const upstream = (async (url: string) => {
+    if (url.endsWith('/models')) return Response.json({ models: [{ slug: 'm', display_name: 'M', visibility: 'list' }] });
+    return new Response(encodeEvent(completed()), { headers: {
+      'content-type': 'text/event-stream',
+      'x-ratelimit-limit-tokens': '1000',
+      'x-ratelimit-remaining-tokens': '500',
+      'x-codex-primary-window-minutes': '300',
+      'x-codex-primary-used-percent': 'unknown',
+      'x-codex-secondary-window-minutes': '60',
+      'x-codex-secondary-used-percent': '25',
+    } });
+  }) as typeof fetch;
+  const bridge = new OAuthBridge(fakeAuth(), 'local', 0, upstream);
+  for await (const _ of bridge.stream({ model: 'm', input: [] }, new AbortController().signal, 'assistant')) {}
+  assert.deepEqual(bridge.planUsage('oaiapp_mock')?.windows, {});
+  assert.equal(bridge.receipts[0].tokenUsage, undefined);
+  const presentation = new UsageIndicator().presentation(true, true, bridge.planUsage('oaiapp_mock'));
+  assert.match(presentation.tooltip, /5h balance unavailable\n7d balance unavailable/);
+  assert.doesNotMatch(presentation.text, /% left/);
+});
+
 test('native thinking selections reach Responses and usage receipts on successive HTTP turns', async () => {
   const requests: any[] = []; const usage = new UsageIndicator();
   const upstream = (async (url: string, init: RequestInit) => {

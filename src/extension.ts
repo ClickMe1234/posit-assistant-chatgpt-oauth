@@ -26,7 +26,7 @@ export async function activate(context: vscode.ExtensionContext) {
   let lastError: string | undefined;
   const updateBar = async () => {
     const active = await auth.active();
-    const presentation = usage.presentation(Boolean(active), active?.scopes.includes(DIRECT_SCOPE) ?? false);
+    const presentation = usage.presentation(Boolean(active), active?.scopes.includes(DIRECT_SCOPE) ?? false, bridge?.planUsage(active?.clientId));
     bar.text = presentation.text; bar.command = presentation.command; bar.tooltip = presentation.tooltip; bar.show();
   };
   const ensureBridge = async () => {
@@ -150,7 +150,9 @@ export async function activate(context: vscode.ExtensionContext) {
       appName: vscode.env.appName, vscodeVersion: vscode.version, assistantVersion: vscode.extensions.getExtension('posit.assistant')?.packageJSON.version,
       credentialStorage: { oauthPresent: Boolean(await context.secrets.get('oauth.sessions.v1')), bridgePresent: Boolean(await context.secrets.get(BRIDGE_SECRET)) },
       bridge: bridge?.baseUrl ?? null, providerConfigured: context.globalState.get('ownsProvider', false),
-      lastProviderBackup: context.globalState.get('lastProviderBackup', undefined), lastError, receipts: bridge?.receipts.map(item => ({ ...item })) ?? [], usageUrl: USAGE };
+      lastProviderBackup: context.globalState.get('lastProviderBackup', undefined), lastError,
+      planUsage: bridge?.planUsage(session?.clientId) ?? null,
+      receipts: bridge?.receipts.map(item => ({ ...item })) ?? [], usageUrl: USAGE };
   };
   const handleError = async (error: unknown) => {
     const safe = safeError(error); lastError = `${safe.code}: ${safe.message}`;
